@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control de Bodega — Reportes Diarios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+:root{
+  --bg:#14161b;
+  --panel:#1b1e25;
+  --panel-2:#20232b;
+  --line:#2c303a;
+  --text:#e9e7e2;
+  --muted:#8a8f9b;
+  --amber:#f2a340;
+  --amber-dim:#c9822e;
+  --teal:#49c8b8;
+  --red:#e5555a;
+  --mono:'JetBrains Mono',monospace;
+  --disp:'Space Grotesk',sans-serif;
+  --body:'Inter',sans-serif;
+  --radius:10px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--body);}
+body{min-height:100vh;}
+a{color:var(--amber);}
+
+/* ===== Layout shell ===== */
+.shell{max-width:1180px;margin:0 auto;padding:28px 20px 80px;}
+
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding-bottom:22px;margin-bottom:26px;border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:12px;}
+.brand-mark{
+  width:38px;height:38px;border-radius:8px;
+  background:repeating-linear-gradient(135deg,var(--amber) 0 6px,var(--amber-dim) 6px 12px);
+  flex:none;
+}
+.brand-text h1{font-family:var(--disp);font-size:17px;margin:0;letter-spacing:.2px;}
+.brand-text span{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;}
+.status-pill{
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+  border:1px solid var(--line);padding:6px 12px;border-radius:100px;
+  display:flex;align-items:center;gap:7px;
+}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);}
+.status-pill.ready .status-dot{background:var(--teal);}
+.status-pill.ready{color:var(--teal);border-color:rgba(73,200,184,.35);}
+
+/* ===== Source panel ===== */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:20px;}
+.panel h2{font-family:var(--disp);font-size:15px;margin:0 0 4px;}
+.panel .sub{color:var(--muted);font-size:12.5px;margin:0 0 18px;line-height:1.5;}
+
+.tabs-input{display:flex;gap:8px;margin-bottom:16px;}
+.tabs-input button{
+  font-family:var(--body);font-size:12.5px;font-weight:600;color:var(--muted);
+  background:transparent;border:1px solid var(--line);padding:7px 13px;border-radius:7px;cursor:pointer;
+}
+.tabs-input button.active{color:var(--bg);background:var(--amber);border-color:var(--amber);}
+
+.dropzones{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.dropzone{
+  border:1.5px dashed var(--line);border-radius:9px;padding:16px 12px;text-align:center;
+  cursor:pointer;transition:border-color .15s,background .15s;position:relative;min-height:108px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+}
+.dropzone:hover,.dropzone.drag{border-color:var(--amber);background:rgba(242,163,64,.05);}
+.dropzone.filled{border-style:solid;border-color:var(--teal);background:rgba(73,200,184,.06);}
+.dropzone .dz-label{font-size:12px;font-weight:600;color:var(--text);}
+.dropzone .dz-hint{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.dropzone .dz-file{font-family:var(--mono);font-size:10.5px;color:var(--teal);word-break:break-all;padding:0 6px;}
+.dropzone input{display:none;}
+.dz-icon{font-size:18px;opacity:.6;}
+
+.url-grid{display:flex;flex-direction:column;gap:10px;}
+.url-row{display:grid;grid-template-columns:140px 1fr;gap:10px;align-items:center;}
+.url-row label{font-size:12px;color:var(--muted);font-weight:600;}
+.url-row input{
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+  padding:9px 12px;border-radius:7px;font-family:var(--mono);font-size:12px;width:100%;
+}
+.url-row input::placeholder{color:#565a64;}
+
+.panel-footer{display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:12px;flex-wrap:wrap;}
+.btn{
+  font-family:var(--body);font-weight:700;font-size:13px;padding:10px 20px;border-radius:8px;
+  border:none;cursor:pointer;background:var(--amber);color:#231704;
+}
+.btn:disabled{background:#3a3d45;color:#757982;cursor:not-allowed;}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:600;padding:9px 16px;}
+.hint-msg{font-size:11.5px;color:var(--muted);}
+.hint-msg.err{color:var(--red);}
+
+/* ===== Dashboard ===== */
+#dashboard{display:none;}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;}
+.kpi .n{font-family:var(--disp);font-size:26px;font-weight:700;}
+.kpi .n.alert{color:var(--red);}
+.kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px;}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap;}
+.tab-btn{
+  font-family:var(--body);font-size:13px;font-weight:600;color:var(--muted);
+  background:transparent;border:none;padding:10px 15px;cursor:pointer;border-bottom:2px solid transparent;
+}
+.tab-btn.active{color:var(--amber);border-color:var(--amber);}
+.tab-pane{display:none;}
+.tab-pane.active{display:block;}
+
+/* rack map (signature element) */
+.rackmap{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;}
+.rack-cell{
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:10px 14px;min-width:104px;flex:1 1 104px;cursor:pointer;transition:transform .1s,border-color .1s;
+}
+.rack-cell:hover{border-color:var(--amber-dim);transform:translateY(-1px);}
+.rack-cell .g-name{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+.rack-cell .g-count{font-family:var(--disp);font-size:20px;margin-top:3px;}
+.rack-cell .g-val{font-size:10.5px;color:var(--teal);margin-top:2px;}
+
+.table-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
+.table-toolbar{display:flex;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.table-toolbar input[type=text]{
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 11px;
+  border-radius:6px;font-size:12.5px;flex:1;min-width:160px;font-family:var(--body);
+}
+.table-toolbar select{
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:8px 11px;
+  border-radius:6px;font-size:12.5px;font-family:var(--body);
+}
+.table-toolbar .count{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto;}
+table{width:100%;border-collapse:collapse;font-size:12.5px;}
+thead th{
+  text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);
+  padding:10px 14px;border-bottom:1px solid var(--line);font-weight:600;position:sticky;top:0;background:var(--panel);
+}
+tbody td{padding:9px 14px;border-bottom:1px solid var(--line);vertical-align:top;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:var(--panel-2);}
+.code{font-family:var(--mono);color:var(--amber);}
+.loc-chip{
+  font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px solid var(--line);
+  padding:2px 7px;border-radius:5px;display:inline-block;
+}
+.badge{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:100px;font-family:var(--body);}
+.badge.warn{background:rgba(229,85,90,.15);color:var(--red);}
+.badge.ok{background:rgba(73,200,184,.15);color:var(--teal);}
+.scroll-y{max-height:520px;overflow-y:auto;}
+.export-btn{
+  font-family:var(--body);font-size:11.5px;font-weight:700;color:var(--bg);background:var(--teal);
+  border:none;padding:6px 12px;border-radius:6px;cursor:pointer;
+}
+.empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13px;}
+.assumption{
+  font-size:11.5px;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);
+  border-radius:8px;padding:10px 13px;margin-bottom:16px;line-height:1.6;
+}
+.assumption b{color:var(--text);}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-text">
+        <h1>Control de Bodega</h1>
+        <span>Reportes diarios · ubicaciones &amp; stock</span>
+      </div>
+    </div>
+    <div class="status-pill" id="statusPill"><span class="status-dot"></span><span id="statusText">Sin datos cargados</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Cargar datos de hoy</h2>
+    <p class="sub">Sube los 3 archivos actualizados, o pega los enlaces de tu Google Sheet publicado como CSV (Archivo → Compartir → Publicar en la web → cada hoja como CSV). Repite este paso cada día antes de revisar los reportes.</p>
+
+    <div class="tabs-input">
+      <button class="active" data-mode="file" onclick="setInputMode('file')">Subir archivos</button>
+      <button data-mode="url" onclick="setInputMode('url')">Enlaces de Google Sheets</button>
+    </div>
+
+    <div id="fileMode">
+      <div class="dropzones">
+        <div class="dropzone" id="dz-ubic" onclick="document.getElementById('f-ubic').click()">
+          <div class="dz-icon">▤</div>
+          <div class="dz-label">Ubicaciones por bodega</div>
+          <div class="dz-hint">CODIGO · UBICACION</div>
+          <input type="file" id="f-ubic" accept=".csv">
+        </div>
+        <div class="dropzone" id="dz-inv" onclick="document.getElementById('f-inv').click()">
+          <div class="dz-icon">▤</div>
+          <div class="dz-label">Inventario valorizado</div>
+          <div class="dz-hint">CODIGO · STOCK · COSTO</div>
+          <input type="file" id="f-inv" accept=".csv">
+        </div>
+        <div class="dropzone" id="dz-mov" onclick="document.getElementById('f-mov').click()">
+          <div class="dz-icon">▤</div>
+          <div class="dz-label">Movimientos con serie</div>
+          <div class="dz-hint">FECHA · ARTICULO · CANT · USUARIO</div>
+          <input type="file" id="f-mov" accept=".csv">
+        </div>
+      </div>
+    </div>
+
+    <div id="urlMode" style="display:none;">
+      <div class="url-grid">
+        <div class="url-row">
+          <label>Ubicaciones</label>
+          <input type="text" id="u-ubic" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=0&single=true&output=csv">
+        </div>
+        <div class="url-row">
+          <label>Inventario</label>
+          <input type="text" id="u-inv" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=123&single=true&output=csv">
+        </div>
+        <div class="url-row">
+          <label>Movimientos</label>
+          <input type="text" id="u-mov" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=456&single=true&output=csv">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-footer">
+      <div>
+        <button class="btn" id="processBtn" onclick="processAll()" disabled>Procesar y generar reportes</button>
+        <button class="btn ghost" onclick="resetAll()">Limpiar</button>
+      </div>
+      <div class="hint-msg" id="loadMsg"></div>
+    </div>
+  </div>
+
+  <div id="dashboard">
+
+    <div class="kpis">
+      <div class="kpi"><div class="n" id="kpiTotal">0</div><div class="l">Códigos con stock &gt; 0</div></div>
+      <div class="kpi"><div class="n" id="kpiGrupos">0</div><div class="l">Zonas de ubicación</div></div>
+      <div class="kpi"><div class="n alert" id="kpiSinUbic">0</div><div class="l">Ubicación desactualizada (sin ubicación)</div></div>
+      <div class="kpi"><div class="n alert" id="kpiConflicto">0</div><div class="l">Ubicación duplicada</div></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="resumen" onclick="setTab('resumen')">Resumen por zona</button>
+      <button class="tab-btn" data-tab="inconsist" onclick="setTab('inconsist')">Inconsistencias</button>
+      <button class="tab-btn" data-tab="ubicaciones" onclick="setTab('ubicaciones')">Detalle ubicaciones</button>
+      <button class="tab-btn" data-tab="movimientos" onclick="setTab('movimientos')">Movimientos</button>
+    </div>
+
+    <!-- RESUMEN -->
+    <div class="tab-pane active" id="pane-resumen">
+      <div class="rackmap" id="rackmap"></div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <span style="font-size:12.5px;font-weight:600;">Valorizado por zona</span>
+          <span class="count" id="resumenCount"></span>
+        </div>
+        <div class="scroll-y">
+          <table>
+            <thead><tr><th>Zona</th><th># Códigos</th><th>Unidades</th><th>Valor inventario</th></tr></thead>
+            <tbody id="resumenBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- INCONSISTENCIAS -->
+    <div class="tab-pane" id="pane-inconsist">
+      <div class="assumption">
+        <b>Criterio aplicado:</b> se ignoran los códigos con stock = 0. <b>"Ubicación desactualizada"</b> = tiene stock pero no aparece en el archivo de ubicaciones. <b>"Ubicación duplicada"</b> = el código aparece más de una vez en el archivo de ubicaciones con ubicaciones distintas.
+      </div>
+      <div class="table-wrap" style="margin-bottom:16px;">
+        <div class="table-toolbar">
+          <span style="font-size:12.5px;font-weight:600;">Ubicación desactualizada (con stock, sin ubicación)</span>
+          <input type="text" id="searchSinUbic" placeholder="Buscar código o descripción..." oninput="renderSinUbic()">
+          <span class="count" id="sinUbicCount"></span>
+          <button class="export-btn" onclick="exportCSV(sinUbicRows,'sin_ubicacion')">Exportar CSV</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Código</th><th>Descripción</th><th>Stock</th><th>Costo unit.</th></tr></thead>
+          <tbody id="sinUbicBody"></tbody>
+        </table></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <span style="font-size:12.5px;font-weight:600;">Ubicación duplicada (con stock, más de una ubicación)</span>
+          <input type="text" id="searchConflicto" placeholder="Buscar código o descripción..." oninput="renderConflicto()">
+          <span class="count" id="conflictoCount"></span>
+          <button class="export-btn" onclick="exportCSV(conflictoRows,'ubicacion_duplicada')">Exportar CSV</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Código</th><th>Descripción</th><th>Stock</th><th>Ubicaciones encontradas</th></tr></thead>
+          <tbody id="conflictoBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- UBICACIONES -->
+    <div class="tab-pane" id="pane-ubicaciones">
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <select id="filterZona" onchange="renderUbicaciones()"></select>
+          <input type="text" id="searchUbic" placeholder="Buscar código, descripción o ubicación..." oninput="renderUbicaciones()">
+          <span class="count" id="ubicCount"></span>
+          <button class="export-btn" onclick="exportCSV(currentUbicRows,'ubicaciones_detalle')">Exportar CSV</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Código</th><th>Descripción</th><th>Ubicación</th><th>Zona</th><th>Stock</th><th>Valor</th></tr></thead>
+          <tbody id="ubicBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- MOVIMIENTOS -->
+    <div class="tab-pane" id="pane-movimientos">
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <input type="text" id="searchMov" placeholder="Buscar por código, descripción o usuario..." oninput="renderMovimientos()">
+          <span class="count" id="movCount"></span>
+          <button class="export-btn" onclick="exportCSV(currentMovRows,'movimientos_filtrados')">Exportar CSV</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Fecha</th><th>Código</th><th>Descripción</th><th>Cantidad</th><th>Usuario procesa</th></tr></thead>
+          <tbody id="movBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+/* ---------- estado ---------- */
+let rawFiles = {ubic:null, inv:null, mov:null};
+let inputMode = 'file';
+let DATA = {ubicRaw:[], invRaw:[], movRaw:[]};
+
+let sinUbicRows = [], conflictoRows = [], currentUbicRows = [], currentMovRows = [];
+let groupSummary = [];
+let ubicDetailAll = [];
+let movAll = [];
+
+/* ---------- input mode ---------- */
+function setInputMode(mode){
+  inputMode = mode;
+  document.querySelectorAll('.tabs-input button').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+  document.getElementById('fileMode').style.display = mode==='file' ? 'block':'none';
+  document.getElementById('urlMode').style.display = mode==='url' ? 'block':'none';
+  updateProcessBtn();
+}
+
+['ubic','inv','mov'].forEach(key=>{
+  document.getElementById('f-'+key).addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    rawFiles[key] = file;
+    const dz = document.getElementById('dz-'+key);
+    dz.classList.add('filled');
+    dz.querySelector('.dz-hint').outerHTML = '<div class="dz-file">'+file.name+'</div>';
+    updateProcessBtn();
+  });
+});
+
+document.getElementById('urlMode').addEventListener('input', updateProcessBtn);
+
+function updateProcessBtn(){
+  let ready = false;
+  if(inputMode==='file'){
+    ready = rawFiles.ubic && rawFiles.inv && rawFiles.mov;
+  } else {
+    ready = val('u-ubic') && val('u-inv') && val('u-mov');
+  }
+  document.getElementById('processBtn').disabled = !ready;
+}
+function val(id){ return document.getElementById(id).value.trim(); }
+
+function resetAll(){
+  rawFiles = {ubic:null, inv:null, mov:null};
+  ['ubic','inv','mov'].forEach(key=>{
+    const dz = document.getElementById('dz-'+key);
+    dz.classList.remove('filled');
+    const f = dz.querySelector('.dz-file');
+    if(f) f.outerHTML = '<div class="dz-hint">'+({ubic:'CODIGO · UBICACION',inv:'CODIGO · STOCK · COSTO',mov:'FECHA · ARTICULO · CANT · USUARIO'})[key]+'</div>';
+    document.getElementById('f-'+key).value = '';
+  });
+  ['u-ubic','u-inv','u-mov'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('loadMsg').textContent='';
+  setStatus(false);
+  updateProcessBtn();
+}
+
+function setStatus(ready, label){
+  const pill = document.getElementById('statusPill');
+  pill.classList.toggle('ready', ready);
+  document.getElementById('statusText').textContent = label || (ready ? 'Reportes actualizados' : 'Sin datos cargados');
+}
+
+/* ---------- parsing helpers ---------- */
+function decodeArrayBuffer(buf){
+  // los CSV exportados vienen en ISO-8859-1 / windows-1252
+  try{
+    return new TextDecoder('windows-1252').decode(buf);
+  }catch(e){
+    return new TextDecoder('utf-8').decode(buf);
+  }
+}
+
+function readFileAsText(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(decodeArrayBuffer(reader.result));
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function fetchAsText(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('No se pudo leer el enlace ('+res.status+')');
+  const buf = await res.arrayBuffer();
+  // los CSV publicados por Google Sheets vienen en UTF-8
+  return new TextDecoder('utf-8').decode(buf);
+}
+
+function parseCSVText(text){
+  // detecta delimitador ; o ,
+  const delim = text.split('\n')[0].includes(';') ? ';' : ',';
+  const result = Papa.parse(text, {delimiter: delim, skipEmptyLines:true});
+  return result.data;
+}
+
+function parseMoney(v){
+  if(v===undefined||v===null) return 0;
+  const n = parseFloat(String(v).replace(/\$/g,'').replace(/,/g,'').trim());
+  return isNaN(n) ? 0 : n;
+}
+function parseNum(v){
+  const n = parseFloat(String(v).replace(/,/g,'').trim());
+  return isNaN(n) ? 0 : n;
+}
+
+/* ---------- carga ---------- */
+async function processAll(){
+  const btn = document.getElementById('processBtn');
+  const msg = document.getElementById('loadMsg');
+  btn.disabled = true;
+  msg.classList.remove('err');
+  msg.textContent = 'Leyendo archivos...';
+  try{
+    let ubicText, invText, movText;
+    if(inputMode==='file'){
+      [ubicText, invText, movText] = await Promise.all([
+        readFileAsText(rawFiles.ubic), readFileAsText(rawFiles.inv), readFileAsText(rawFiles.mov)
+      ]);
+    } else {
+      [ubicText, invText, movText] = await Promise.all([
+        fetchAsText(val('u-ubic')), fetchAsText(val('u-inv')), fetchAsText(val('u-mov'))
+      ]);
+    }
+    DATA.ubicRaw = parseCSVText(ubicText).slice(1).filter(r=>r.length>1 && r[0]);
+    DATA.invRaw  = parseCSVText(invText).slice(1).filter(r=>r.length>1 && r[0]);
+    DATA.movRaw  = parseCSVText(movText).slice(1).filter(r=>r.length>1 && r[0]);
+
+    msg.textContent = 'Procesando reportes...';
+    await new Promise(r=>setTimeout(r,30));
+    buildReports();
+    document.getElementById('dashboard').style.display='block';
+    setStatus(true);
+    msg.textContent = 'Actualizado: '+ new Date().toLocaleString('es-EC');
+  }catch(err){
+    console.error(err);
+    msg.classList.add('err');
+    msg.textContent = 'Error: '+err.message+'. Revisa los archivos o enlaces.';
+    setStatus(false,'Error al procesar');
+  }
+  btn.disabled = false;
+}
+
+/* ---------- clasificación de zonas ---------- */
+function classifyZona(ubicRaw){
+  const u = (ubicRaw||'').toUpperCase().trim();
+  if(!u) return null;
+  if(u.includes('PASILLO')) return 'PASILLO';
+  if(/^ANQ/.test(u) || /^C\d{2}/.test(u) || /^ORG/.test(u) || u==='OFICINA' || u==='DESPACHOS') return 'OFICINA';
+  let m = u.match(/^P(\d{2})/);
+  if(m) return 'PERCHA '+m[1];
+  m = u.match(/^EXT(\d{2})/);
+  if(m) return 'EXTERIOR '+m[1];
+  m = u.match(/^INT(\d{2})/);
+  if(m) return 'INTERIOR '+m[1];
+  m = u.match(/^R(\d{2})/);
+  if(m) return 'RACK '+m[1];
+  return 'OTROS / SIN CLASIFICAR';
+}
+
+/* ---------- build reports ---------- */
+function buildReports(){
+  // mapa ubicaciones: codigo -> [ubicaciones]
+  const ubicMap = {}; // codigo -> Set of ubicacion strings (raw, trimmed)
+  DATA.ubicRaw.forEach(r=>{
+    const codigo = (r[0]||'').trim();
+    const ubic = (r[2]||'').trim();
+    if(!codigo || !ubic) return;
+    if(!ubicMap[codigo]) ubicMap[codigo] = new Set();
+    ubicMap[codigo].add(ubic);
+  });
+
+  // inventario: codigo -> {desc, stock, costo}
+  const invMap = {};
+  DATA.invRaw.forEach(r=>{
+    const codigo = (r[0]||'').trim();
+    if(!codigo) return;
+    invMap[codigo] = {
+      desc: (r[1]||'').trim(),
+      stock: parseNum(r[2]),
+      costo: parseMoney(r[3])
+    };
+  });
+
+  // movimientos
+  movAll = DATA.movRaw.map(r=>({
+    fecha: (r[0]||'').trim(),
+    codigo: (r[8]||'').trim(),
+    desc: (r[9]||'').trim(),
+    cantidad: parseNum(r[11]),
+    usuario: (r[17]||'').trim()
+  })).filter(m=>m.codigo);
+
+  // detalle ubicaciones + zonas (para códigos con ubicación asignada)
+  ubicDetailAll = [];
+  const zonaAgg = {}; // zona -> {count, unidades, valor}
+
+  Object.keys(ubicMap).forEach(codigo=>{
+    const locs = Array.from(ubicMap[codigo]);
+    const inv = invMap[codigo];
+    const stock = inv ? inv.stock : 0;
+    locs.forEach(loc=>{
+      const zona = classifyZona(loc);
+      ubicDetailAll.push({
+        codigo, desc: inv ? inv.desc : '', ubicacion: loc, zona,
+        stock, valor: stock * (inv ? inv.costo : 0)
+      });
+      if(!zonaAgg[zona]) zonaAgg[zona] = {count:0, unidades:0, valor:0};
+    });
+  });
+
+  // agregación por zona (solo códigos con stock>0, contando 1 vez por código+zona)
+  const seenCodeZona = new Set();
+  ubicDetailAll.forEach(row=>{
+    if(row.stock<=0) return;
+    const key = row.codigo+'|'+row.zona;
+    if(seenCodeZona.has(key)) return;
+    seenCodeZona.add(key);
+    zonaAgg[row.zona].count += 1;
+    zonaAgg[row.zona].unidades += row.stock;
+    zonaAgg[row.zona].valor += row.valor;
+  });
+
+  groupSummary = Object.keys(zonaAgg).sort().map(z=>({zona:z, ...zonaAgg[z]}));
+
+  // inconsistencias: solo códigos con stock > 0
+  sinUbicRows = [];
+  conflictoRows = [];
+  Object.keys(invMap).forEach(codigo=>{
+    const inv = invMap[codigo];
+    if(inv.stock<=0) return;
+    const locs = ubicMap[codigo];
+    if(!locs || locs.size===0){
+      sinUbicRows.push({codigo, desc:inv.desc, stock:inv.stock, costo:inv.costo});
+    } else if(locs.size>1){
+      conflictoRows.push({codigo, desc:inv.desc, stock:inv.stock, ubicaciones: Array.from(locs).join(' / ')});
+    }
+  });
+
+  // KPIs
+  const totalConStock = Object.values(invMap).filter(i=>i.stock>0).length;
+  document.getElementById('kpiTotal').textContent = totalConStock;
+  document.getElementById('kpiGrupos').textContent = groupSummary.length;
+  document.getElementById('kpiSinUbic').textContent = sinUbicRows.length;
+  document.getElementById('kpiConflicto').textContent = conflictoRows.length;
+
+  renderRackmap();
+  renderResumen();
+  renderSinUbic();
+  renderConflicto();
+  populateZonaFilter();
+  renderUbicaciones();
+  renderMovimientos();
+}
+
+/* ---------- render: resumen ---------- */
+function renderRackmap(){
+  const el = document.getElementById('rackmap');
+  el.innerHTML = groupSummary.map(g=>`
+    <div class="rack-cell" onclick="jumpToZona('${g.zona.replace(/'/g,"\\'")}')">
+      <div class="g-name">${g.zona}</div>
+      <div class="g-count">${g.count}</div>
+      <div class="g-val">$${g.valor.toFixed(2)}</div>
+    </div>`).join('');
+}
+function jumpToZona(zona){
+  setTab('ubicaciones');
+  document.getElementById('filterZona').value = zona;
+  renderUbicaciones();
+}
+function renderResumen(){
+  const body = document.getElementById('resumenBody');
+  document.getElementById('resumenCount').textContent = groupSummary.length+' zonas';
+  if(groupSummary.length===0){ body.innerHTML = '<tr><td colspan="4" class="empty">Sin datos</td></tr>'; return; }
+  body.innerHTML = groupSummary.map(g=>`
+    <tr><td>${g.zona}</td><td>${g.count}</td><td>${g.unidades}</td><td>$${g.valor.toFixed(2)}</td></tr>
+  `).join('');
+}
+
+/* ---------- render: inconsistencias ---------- */
+function renderSinUbic(){
+  const q = document.getElementById('searchSinUbic').value.toLowerCase();
+  const rows = sinUbicRows.filter(r=> !q || r.codigo.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q));
+  document.getElementById('sinUbicCount').textContent = rows.length+' códigos';
+  const body = document.getElementById('sinUbicBody');
+  body.innerHTML = rows.length ? rows.map(r=>`
+    <tr><td class="code">${r.codigo}</td><td>${r.desc}</td><td>${r.stock}</td><td>$${r.costo.toFixed(2)}</td></tr>
+  `).join('') : '<tr><td colspan="4" class="empty">Sin resultados 🎉</td></tr>';
+}
+function renderConflicto(){
+  const q = document.getElementById('searchConflicto').value.toLowerCase();
+  const rows = conflictoRows.filter(r=> !q || r.codigo.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q));
+  document.getElementById('conflictoCount').textContent = rows.length+' códigos';
+  const body = document.getElementById('conflictoBody');
+  body.innerHTML = rows.length ? rows.map(r=>`
+    <tr><td class="code">${r.codigo}</td><td>${r.desc}</td><td>${r.stock}</td><td>${r.ubicaciones.split(' / ').map(u=>'<span class="loc-chip">'+u+'</span>').join(' ')}</td></tr>
+  `).join('') : '<tr><td colspan="4" class="empty">Sin resultados 🎉</td></tr>';
+}
+
+/* ---------- render: detalle ubicaciones ---------- */
+function populateZonaFilter(){
+  const sel = document.getElementById('filterZona');
+  sel.innerHTML = '<option value="">Todas las zonas</option>' + groupSummary.map(g=>`<option>${g.zona}</option>`).join('');
+}
+function renderUbicaciones(){
+  const zona = document.getElementById('filterZona').value;
+  const q = document.getElementById('searchUbic').value.toLowerCase();
+  currentUbicRows = ubicDetailAll.filter(r=>{
+    if(zona && r.zona!==zona) return false;
+    if(!q) return true;
+    return r.codigo.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q) || r.ubicacion.toLowerCase().includes(q);
+  }).sort((a,b)=> a.zona.localeCompare(b.zona) || a.codigo.localeCompare(b.codigo));
+  document.getElementById('ubicCount').textContent = currentUbicRows.length+' registros';
+  const body = document.getElementById('ubicBody');
+  body.innerHTML = currentUbicRows.length ? currentUbicRows.map(r=>`
+    <tr><td class="code">${r.codigo}</td><td>${r.desc}</td><td><span class="loc-chip">${r.ubicacion}</span></td><td>${r.zona}</td><td>${r.stock}</td><td>$${r.valor.toFixed(2)}</td></tr>
+  `).join('') : '<tr><td colspan="6" class="empty">Sin resultados</td></tr>';
+}
+
+/* ---------- render: movimientos ---------- */
+function renderMovimientos(){
+  const q = document.getElementById('searchMov').value.toLowerCase();
+  currentMovRows = !q ? movAll : movAll.filter(m=>
+    m.codigo.toLowerCase().includes(q) || m.desc.toLowerCase().includes(q) || m.usuario.toLowerCase().includes(q)
+  );
+  document.getElementById('movCount').textContent = currentMovRows.length+' movimientos';
+  const body = document.getElementById('movBody');
+  const rows = currentMovRows.slice(0,500);
+  body.innerHTML = rows.length ? rows.map(m=>`
+    <tr><td>${m.fecha}</td><td class="code">${m.codigo}</td><td>${m.desc}</td><td>${m.cantidad}</td><td>${m.usuario}</td></tr>
+  `).join('') + (currentMovRows.length>500 ? `<tr><td colspan="5" class="empty">Mostrando 500 de ${currentMovRows.length} — usa el buscador o exporta CSV para ver todos</td></tr>` : '')
+    : '<tr><td colspan="5" class="empty">Sin resultados</td></tr>';
+}
+
+/* ---------- tabs ---------- */
+function setTab(name){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active', p.id==='pane-'+name));
+}
+
+/* ---------- export ---------- */
+function exportCSV(rows, filename){
+  if(!rows || !rows.length){ alert('No hay datos para exportar.'); return; }
+  const keys = Object.keys(rows[0]);
+  const csv = [keys.join(';')].concat(
+    rows.map(r=> keys.map(k=> String(r[k]).replace(/;/g,',')).join(';'))
+  ).join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  link.click();
+}
+</script>
+</body>
+</html>
