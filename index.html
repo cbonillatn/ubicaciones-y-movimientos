@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#14161b;
@@ -252,6 +253,7 @@ tbody tr:hover{background:var(--panel-2);}
       <button class="tab-btn" data-tab="inconsist" onclick="setTab('inconsist')">Inconsistencias</button>
       <button class="tab-btn" data-tab="ubicaciones" onclick="setTab('ubicaciones')">Detalle ubicaciones</button>
       <button class="tab-btn" data-tab="movimientos" onclick="setTab('movimientos')">Movimientos</button>
+      <button class="tab-btn" data-tab="salidasingresos" onclick="setTab('salidasingresos')">Salidas / Ingresos</button>
     </div>
 
     <!-- RESUMEN -->
@@ -333,6 +335,37 @@ tbody tr:hover{background:var(--panel-2);}
       </div>
     </div>
 
+    <!-- SALIDAS / INGRESOS -->
+    <div class="tab-pane" id="pane-salidasingresos">
+      <div class="assumption">
+        <b>Criterio aplicado:</b> según la columna <b>Estado Bodega</b> del archivo de movimientos: <b>"Fuera Bodega" → Salidas</b>, <b>"En Bodega" → Ingresos</b>. Stock actual, ubicación y costo unitario se cruzan con los archivos de Inventario y Ubicaciones por código de artículo. <span id="sinClasifNote"></span>
+      </div>
+      <div class="table-wrap" style="margin-bottom:16px;">
+        <div class="table-toolbar">
+          <span style="font-size:12.5px;font-weight:600;color:var(--red);">Salidas (Fuera Bodega)</span>
+          <input type="text" id="searchSalidas" placeholder="Buscar código, descripción, documento o usuario..." oninput="renderSalidas()">
+          <span class="count" id="salidasCount"></span>
+          <button class="export-btn" onclick="exportXLSX(currentSalidasRows,'salidas','Salidas')">Descargar Excel</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock actual</th><th>Ubicación</th><th>Costo unit.</th><th>Costo mov.</th><th>Tipo doc.</th><th>N° doc.</th><th>Procesa</th></tr></thead>
+          <tbody id="salidasBody"></tbody>
+        </table></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <span style="font-size:12.5px;font-weight:600;color:var(--teal);">Ingresos (En Bodega)</span>
+          <input type="text" id="searchIngresos" placeholder="Buscar código, descripción, documento o usuario..." oninput="renderIngresos()">
+          <span class="count" id="ingresosCount"></span>
+          <button class="export-btn" onclick="exportXLSX(currentIngresosRows,'ingresos','Ingresos')">Descargar Excel</button>
+        </div>
+        <div class="scroll-y"><table>
+          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock actual</th><th>Ubicación</th><th>Costo unit.</th><th>Costo mov.</th><th>Tipo doc.</th><th>N° doc.</th><th>Procesa</th></tr></thead>
+          <tbody id="ingresosBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
   </div>
 
 </div>
@@ -344,6 +377,7 @@ let inputMode = 'file';
 let DATA = {ubicRaw:[], invRaw:[], movRaw:[]};
 
 let sinUbicRows = [], conflictoRows = [], currentUbicRows = [], currentMovRows = [];
+let salidasRows = [], ingresosRows = [], currentSalidasRows = [], currentIngresosRows = [];
 let groupSummary = [];
 let ubicDetailAll = [];
 let movAll = [];
@@ -432,10 +466,17 @@ async function fetchAsText(url){
 }
 
 function parseCSVText(text){
-  // detecta delimitador ; o ,
-  const delim = text.split('\n')[0].includes(';') ? ';' : ',';
-  const result = Papa.parse(text, {delimiter: delim, skipEmptyLines:true});
+  // los 3 archivos de bodega usan ; como separador
+  const result = Papa.parse(text, {delimiter: ';', skipEmptyLines:true});
   return result.data;
+}
+
+// Encuentra la fila de encabezado real buscando una palabra clave en la primera celda,
+// para tolerar filas de título/vacías que a veces se agregan antes del encabezado.
+function extractDataRows(rows, headerKeywords){
+  let headerIdx = rows.findIndex(r => r[0] && headerKeywords.includes(String(r[0]).trim().toUpperCase()));
+  if(headerIdx === -1) headerIdx = 0;
+  return rows.slice(headerIdx+1).filter(r => r.length>1 && r.some(c=>c && String(c).trim()!==''));
 }
 
 function parseMoney(v){
@@ -466,9 +507,9 @@ async function processAll(){
         fetchAsText(val('u-ubic')), fetchAsText(val('u-inv')), fetchAsText(val('u-mov'))
       ]);
     }
-    DATA.ubicRaw = parseCSVText(ubicText).slice(1).filter(r=>r.length>1 && r[0]);
-    DATA.invRaw  = parseCSVText(invText).slice(1).filter(r=>r.length>1 && r[0]);
-    DATA.movRaw  = parseCSVText(movText).slice(1).filter(r=>r.length>1 && r[0]);
+    DATA.ubicRaw = extractDataRows(parseCSVText(ubicText), ['CODIGO']);
+    DATA.invRaw  = extractDataRows(parseCSVText(invText), ['ARTICULO','CODIGO']);
+    DATA.movRaw  = extractDataRows(parseCSVText(movText), ['FECHA']);
 
     msg.textContent = 'Procesando reportes...';
     await new Promise(r=>setTimeout(r,30));
@@ -535,6 +576,39 @@ function buildReports(){
     usuario: (r[17]||'').trim()
   })).filter(m=>m.codigo);
 
+  // Movimientos detallados con cruce a inventario y ubicaciones (para Salidas/Ingresos)
+  salidasRows = [];
+  ingresosRows = [];
+  let sinClasifCount = 0;
+  DATA.movRaw.forEach(r=>{
+    const codigo = (r[8]||'').trim();
+    if(!codigo) return;
+    const estado = (r[4]||'').trim().toLowerCase();
+    const inv = invMap[codigo];
+    const locs = ubicMap[codigo];
+    const costoUnitario = inv ? inv.costo : null;
+    const cantidad = parseNum(r[11]);
+    const row = {
+      fechaProceso: (r[1]||'').trim(),
+      codigo,
+      articulo: (r[9]||'').trim(),
+      cantidad,
+      stockActual: inv ? inv.stock : 'Sin dato en inventario',
+      ubicacion: locs && locs.size ? Array.from(locs).join(' / ') : 'SIN UBICACIÓN',
+      costoUnitario: costoUnitario===null ? 'Sin dato en inventario' : Number(costoUnitario.toFixed(4)),
+      costoMovimiento: costoUnitario===null ? 'Sin dato en inventario' : Number((cantidad*costoUnitario).toFixed(2)),
+      tipoDocumento: (r[6]||'').trim(),
+      numeroDocumento: (r[7]||'').trim(),
+      procesa: (r[17]||'').trim()
+    };
+    if(estado==='fuera bodega') salidasRows.push(row);
+    else if(estado==='en bodega') ingresosRows.push(row);
+    else sinClasifCount++;
+  });
+  document.getElementById('sinClasifNote').textContent = sinClasifCount>0
+    ? ('Hay '+sinClasifCount+' movimiento(s) con Estado Bodega vacío/no reconocido — no se incluyen en ninguno de los dos reportes.')
+    : '';
+
   // detalle ubicaciones + zonas (para códigos con ubicación asignada)
   ubicDetailAll = [];
   const zonaAgg = {}; // zona -> {count, unidades, valor}
@@ -595,6 +669,8 @@ function buildReports(){
   populateZonaFilter();
   renderUbicaciones();
   renderMovimientos();
+  renderSalidas();
+  renderIngresos();
 }
 
 /* ---------- render: resumen ---------- */
@@ -674,6 +750,63 @@ function renderMovimientos(){
     <tr><td>${m.fecha}</td><td class="code">${m.codigo}</td><td>${m.desc}</td><td>${m.cantidad}</td><td>${m.usuario}</td></tr>
   `).join('') + (currentMovRows.length>500 ? `<tr><td colspan="5" class="empty">Mostrando 500 de ${currentMovRows.length} — usa el buscador o exporta CSV para ver todos</td></tr>` : '')
     : '<tr><td colspan="5" class="empty">Sin resultados</td></tr>';
+}
+
+/* ---------- render: salidas / ingresos ---------- */
+function matchesQuery(row, q){
+  if(!q) return true;
+  return row.codigo.toLowerCase().includes(q) || row.articulo.toLowerCase().includes(q) ||
+    row.numeroDocumento.toLowerCase().includes(q) || row.procesa.toLowerCase().includes(q);
+}
+function fmtMoney(v){ return typeof v==='number' ? '$'+v.toFixed(2) : v; }
+function rowToTr(r){
+  return `<tr>
+    <td>${r.fechaProceso}</td><td class="code">${r.codigo}</td><td>${r.articulo}</td>
+    <td>${r.cantidad}</td><td>${r.stockActual}</td><td><span class="loc-chip">${r.ubicacion}</span></td>
+    <td>${fmtMoney(r.costoUnitario)}</td><td>${fmtMoney(r.costoMovimiento)}</td>
+    <td>${r.tipoDocumento}</td><td>${r.numeroDocumento}</td><td>${r.procesa}</td>
+  </tr>`;
+}
+function renderSalidas(){
+  const q = document.getElementById('searchSalidas').value.toLowerCase();
+  currentSalidasRows = salidasRows.filter(r=>matchesQuery(r,q));
+  document.getElementById('salidasCount').textContent = currentSalidasRows.length+' salidas';
+  const body = document.getElementById('salidasBody');
+  const rows = currentSalidasRows.slice(0,500);
+  body.innerHTML = rows.length ? rows.map(rowToTr).join('') +
+    (currentSalidasRows.length>500 ? `<tr><td colspan="11" class="empty">Mostrando 500 de ${currentSalidasRows.length} — descarga el Excel para ver todos</td></tr>` : '')
+    : '<tr><td colspan="11" class="empty">Sin resultados</td></tr>';
+}
+function renderIngresos(){
+  const q = document.getElementById('searchIngresos').value.toLowerCase();
+  currentIngresosRows = ingresosRows.filter(r=>matchesQuery(r,q));
+  document.getElementById('ingresosCount').textContent = currentIngresosRows.length+' ingresos';
+  const body = document.getElementById('ingresosBody');
+  const rows = currentIngresosRows.slice(0,500);
+  body.innerHTML = rows.length ? rows.map(rowToTr).join('') +
+    (currentIngresosRows.length>500 ? `<tr><td colspan="11" class="empty">Mostrando 500 de ${currentIngresosRows.length} — descarga el Excel para ver todos</td></tr>` : '')
+    : '<tr><td colspan="11" class="empty">Sin resultados</td></tr>';
+}
+
+/* ---------- export xlsx ---------- */
+const XLSX_HEADERS = {
+  fechaProceso:'Fecha de proceso', codigo:'Artículo', articulo:'Nombre del artículo',
+  cantidad:'Cantidad', stockActual:'Stock actual', ubicacion:'Ubicación',
+  costoUnitario:'Costo unitario', costoMovimiento:'Costo del movimiento',
+  tipoDocumento:'Tipo de documento', numeroDocumento:'Número de documento', procesa:'Procesa'
+};
+function exportXLSX(rows, filename, sheetName){
+  if(!rows || !rows.length){ alert('No hay datos para exportar.'); return; }
+  const mapped = rows.map(r=>{
+    const o = {};
+    Object.keys(XLSX_HEADERS).forEach(k=> o[XLSX_HEADERS[k]] = r[k]);
+    return o;
+  });
+  const ws = XLSX.utils.json_to_sheet(mapped);
+  ws['!cols'] = Object.keys(XLSX_HEADERS).map(()=>({wch:18}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, filename+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
 }
 
 /* ---------- tabs ---------- */
