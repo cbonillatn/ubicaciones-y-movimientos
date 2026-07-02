@@ -338,7 +338,7 @@ tbody tr:hover{background:var(--panel-2);}
     <!-- SALIDAS / INGRESOS -->
     <div class="tab-pane" id="pane-salidasingresos">
       <div class="assumption">
-        <b>Criterio aplicado:</b> según la columna <b>Estado Bodega</b> del archivo de movimientos: <b>"Fuera Bodega" → Salidas</b>, <b>"En Bodega" → Ingresos</b>. Stock actual, ubicación y costo unitario se cruzan con los archivos de Inventario y Ubicaciones por código de artículo. <span id="sinClasifNote"></span>
+        <b>Criterio aplicado:</b> según <b>Estado Bodega</b>: "Fuera Bodega" → Salidas, "En Bodega" → Ingresos. Se excluyen artículos con stock actual = 0. Si un código tiene varios movimientos el mismo reporte, se deja <b>una sola línea</b> con la fecha del movimiento más reciente, tipo de documento/procesa/documento de ese último movimiento, y la <b>cantidad sumada (diferencia)</b> de todos sus movimientos del día; el costo se recalcula sobre esa cantidad. <span id="sinClasifNote"></span>
       </div>
       <div class="table-wrap" style="margin-bottom:16px;">
         <div class="table-toolbar">
@@ -348,7 +348,7 @@ tbody tr:hover{background:var(--panel-2);}
           <button class="export-btn" onclick="exportXLSX(currentSalidasRows,'salidas','Salidas')">Descargar Excel</button>
         </div>
         <div class="scroll-y"><table>
-          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock actual</th><th>Ubicación</th><th>Costo unit.</th><th>Costo mov.</th><th>Tipo doc.</th><th>N° doc.</th><th>Procesa</th></tr></thead>
+          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock</th><th>Ubicación</th><th>Costo unit.</th><th>Costo salida</th><th>Tipo doc.</th><th>Procesa</th><th>N° doc.</th></tr></thead>
           <tbody id="salidasBody"></tbody>
         </table></div>
       </div>
@@ -360,7 +360,7 @@ tbody tr:hover{background:var(--panel-2);}
           <button class="export-btn" onclick="exportXLSX(currentIngresosRows,'ingresos','Ingresos')">Descargar Excel</button>
         </div>
         <div class="scroll-y"><table>
-          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock actual</th><th>Ubicación</th><th>Costo unit.</th><th>Costo mov.</th><th>Tipo doc.</th><th>N° doc.</th><th>Procesa</th></tr></thead>
+          <thead><tr><th>Fecha proceso</th><th>Código</th><th>Artículo</th><th>Cant.</th><th>Stock</th><th>Ubicación</th><th>Costo unit.</th><th>Costo ingreso</th><th>Tipo doc.</th><th>Procesa</th><th>N° doc.</th></tr></thead>
           <tbody id="ingresosBody"></tbody>
         </table></div>
       </div>
@@ -577,34 +577,67 @@ function buildReports(){
   })).filter(m=>m.codigo);
 
   // Movimientos detallados con cruce a inventario y ubicaciones (para Salidas/Ingresos)
-  salidasRows = [];
-  ingresosRows = [];
   let sinClasifCount = 0;
+  const salidasTmp = {}; // codigo -> row acumulado
+  const ingresosTmp = {};
+
+  function parseFechaHora(s){
+    if(!s) return new Date(0);
+    const [datePart, timePart] = s.trim().split(' ');
+    if(!datePart) return new Date(0);
+    const [d,m,y] = datePart.split('/').map(Number);
+    let hh=0,mm=0,ss=0;
+    if(timePart){ const t = timePart.split(':').map(Number); hh=t[0]||0; mm=t[1]||0; ss=t[2]||0; }
+    return new Date(y||2000, (m||1)-1, d||1, hh, mm, ss);
+  }
+
   DATA.movRaw.forEach(r=>{
     const codigo = (r[8]||'').trim();
     if(!codigo) return;
     const estado = (r[4]||'').trim().toLowerCase();
     const inv = invMap[codigo];
+    // se ignoran códigos con stock = 0 (los que no están en inventario no se filtran, se marcan como "sin dato")
+    if(inv && inv.stock<=0) return;
+
     const locs = ubicMap[codigo];
     const costoUnitario = inv ? inv.costo : null;
     const cantidad = parseNum(r[11]);
-    const row = {
-      fechaProceso: (r[1]||'').trim(),
-      codigo,
-      articulo: (r[9]||'').trim(),
-      cantidad,
-      stockActual: inv ? inv.stock : 'Sin dato en inventario',
-      ubicacion: locs && locs.size ? Array.from(locs).join(' / ') : 'SIN UBICACIÓN',
-      costoUnitario: costoUnitario===null ? 'Sin dato en inventario' : Number(costoUnitario.toFixed(4)),
-      costoMovimiento: costoUnitario===null ? 'Sin dato en inventario' : Number((cantidad*costoUnitario).toFixed(2)),
-      tipoDocumento: (r[6]||'').trim(),
-      numeroDocumento: (r[7]||'').trim(),
-      procesa: (r[17]||'').trim()
-    };
-    if(estado==='fuera bodega') salidasRows.push(row);
-    else if(estado==='en bodega') ingresosRows.push(row);
-    else sinClasifCount++;
+    const fecha = (r[1]||'').trim();
+
+    const bucket = estado==='fuera bodega' ? salidasTmp : (estado==='en bodega' ? ingresosTmp : null);
+    if(!bucket){ sinClasifCount++; return; }
+
+    const existing = bucket[codigo];
+    if(!existing || parseFechaHora(fecha) >= parseFechaHora(existing.fechaProceso)){
+      // esta es la fila "vigente" (más reciente): guarda sus datos de documento/tipo/procesa
+      bucket[codigo] = {
+        fechaProceso: fecha,
+        codigo,
+        articulo: (r[9]||'').trim(),
+        cantidad: (existing ? existing.cantidad : 0) + cantidad,
+        stockActual: inv ? inv.stock : 'Sin dato en inventario',
+        ubicacion: locs && locs.size ? Array.from(locs).join(' / ') : 'SIN UBICACIÓN',
+        costoUnitario: costoUnitario===null ? 'Sin dato en inventario' : Number(costoUnitario.toFixed(4)),
+        tipoDocumento: (r[6]||'').trim(),
+        numeroDocumento: (r[7]||'').trim(),
+        procesa: (r[17]||'').trim()
+      };
+    } else {
+      // movimiento más antiguo del mismo código: solo suma su cantidad a la diferencia
+      existing.cantidad += cantidad;
+    }
   });
+
+  function finalizeBucket(bucket){
+    return Object.values(bucket).map(row=>{
+      const cu = row.costoUnitario;
+      row.costoMovimiento = (cu==='Sin dato en inventario') ? 'Sin dato en inventario' : Number((row.cantidad*cu).toFixed(2));
+      return row;
+    });
+  }
+  salidasRows = finalizeBucket(salidasTmp);
+  ingresosRows = finalizeBucket(ingresosTmp);
+
   document.getElementById('sinClasifNote').textContent = sinClasifCount>0
     ? ('Hay '+sinClasifCount+' movimiento(s) con Estado Bodega vacío/no reconocido — no se incluyen en ninguno de los dos reportes.')
     : '';
@@ -764,7 +797,7 @@ function rowToTr(r){
     <td>${r.fechaProceso}</td><td class="code">${r.codigo}</td><td>${r.articulo}</td>
     <td>${r.cantidad}</td><td>${r.stockActual}</td><td><span class="loc-chip">${r.ubicacion}</span></td>
     <td>${fmtMoney(r.costoUnitario)}</td><td>${fmtMoney(r.costoMovimiento)}</td>
-    <td>${r.tipoDocumento}</td><td>${r.numeroDocumento}</td><td>${r.procesa}</td>
+    <td>${r.tipoDocumento}</td><td>${r.procesa}</td><td>${r.numeroDocumento}</td>
   </tr>`;
 }
 function renderSalidas(){
@@ -790,10 +823,10 @@ function renderIngresos(){
 
 /* ---------- export xlsx ---------- */
 const XLSX_HEADERS = {
-  fechaProceso:'Fecha de proceso', codigo:'Artículo', articulo:'Nombre del artículo',
-  cantidad:'Cantidad', stockActual:'Stock actual', ubicacion:'Ubicación',
-  costoUnitario:'Costo unitario', costoMovimiento:'Costo del movimiento',
-  tipoDocumento:'Tipo de documento', numeroDocumento:'Número de documento', procesa:'Procesa'
+  fechaProceso:'Fecha Procesa', codigo:'Articulo', articulo:'Descripcion',
+  cantidad:'Cantidad', stockActual:'Stock', ubicacion:'Ubicacion',
+  costoUnitario:'Costo Unitario', costoMovimiento:'Costo',
+  tipoDocumento:'Tipo Doc', procesa:'Procesa', numeroDocumento:'Documento'
 };
 function exportXLSX(rows, filename, sheetName){
   if(!rows || !rows.length){ alert('No hay datos para exportar.'); return; }
